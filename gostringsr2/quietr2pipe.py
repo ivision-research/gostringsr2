@@ -8,7 +8,6 @@ from subprocess import Popen, PIPE
 
 class open(r2pipe.open_sync.open):
     def __init__(self, filename="", flags=[], radare2home=None):
-        super(open, self).__init__("", flags)
         if filename:
             self._cmd = self._cmd_process
             if radare2home is not None:
@@ -38,43 +37,3 @@ class open(r2pipe.open_sync.open):
                 fd = self.process.stdout.fileno()
                 if not self.__make_non_blocking(fd):
                     Exception("ERROR: Cannot make stdout pipe non-blocking")
-
-    """ Override _cmd_process to return bytes instead of a decoded utf8 string """
-
-    def _cmd_process(self, cmd):
-        cmd = cmd.strip().replace("\n", ";")
-        self.process.stdin.write((cmd + "\n").encode("utf8"))
-        r = self.process.stdout
-        out = b""
-        sys.stdout.flush()  # flush any output before running command, in case thecommand takes a while
-        c = 0
-        while True:
-            if self.nonblocking:
-                try:
-                    foo = r.read(4096)
-                except:
-                    continue
-            else:
-                foo = r.read(1)
-            if foo:
-                if foo.endswith(b"\0"):
-                    out += foo[:-1]
-                    break
-
-                out += foo
-            else:
-                # if there is no any output from pipe this loop will eat CPU, probably we have to do micro-sleep here
-                if self.nonblocking:
-                    time.sleep(0.001)
-                    c += 1
-                    if c % 50 == 0:
-                        print(
-                            ["_", "-", "+", "-"][c // 50 % 4],
-                            end="",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-
-        if c >= 50:
-            print("", file=sys.stderr, flush=True)
-        return out

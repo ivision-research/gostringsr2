@@ -2,13 +2,19 @@
 
 import sys
 import json
+import binascii
 
-from . import r2piper as r2piper
+from . import quietr2pipe as r2pipe
+
+
+class GoStringsR2Error(RuntimeError):
+    pass
 
 
 class GoStringsR2:
-    def __init__(self, _file):
+    def __init__(self, _file, _logging=False):
         self.file = _file
+        self.logging = _logging
         self.loaded = False
         self.r2 = None
 
@@ -23,11 +29,15 @@ class GoStringsR2:
         return self.r2.cmd(cmd)
 
     def load(self):
-        self.r2 = r2piper.open(self.file)
+        self.log("Loading file into r2: {}".format(self.file))
+        self.r2 = r2pipe.open(self.file)
         self.data = {}
+        self.data["info"] = self.runjson("ij")
+        if "bin" not in self.data["info"]:
+            raise GoStringsR2Error("r2 could not parse the binary")
+
         self.data["symbols"] = self.runjson("isj")
         self.data["sections"] = self.runjson("iSj")
-        self.data["info"] = self.runjson("ij")
 
         self.arch = self.data["info"]["bin"]["arch"]
         self.bintype = self.data["info"]["bin"]["bintype"]
@@ -36,20 +46,30 @@ class GoStringsR2:
 
         self.loaded = True
 
+        self.log(self.file_info())
+
     def file_info(self):
         if self.loaded:
-            return "{}\n\t+ size={} KB\n\t+ lang={}\n\t+ arch={}-bit {}\n\t+ os={}\n\t+ type={}\n\t+ stripped={}\n\n".format(
-                self.data["info"]["core"]["file"],
-                self.data["info"]["core"]["size"] // 1024,
-                self.data["info"]["bin"]["lang"],
-                self.data["info"]["bin"]["bits"],
-                self.data["info"]["bin"]["arch"],
-                self.data["info"]["bin"]["os"],
-                self.data["info"]["bin"]["bintype"],
-                self.data["info"]["bin"]["stripped"],
+            return (
+                "file: {}\n"
+                "size: {} KB\n"
+                "executable: {}\n"
+                "language: {}\n"
+                "architecture: {}-bit {}\n"
+                "os: {}\n"
+                "stripped: {}\n".format(
+                    self.data["info"]["core"]["file"],
+                    self.data["info"]["core"]["size"] // 1024,
+                    self.data["info"]["bin"]["bintype"],
+                    self.data["info"]["bin"]["lang"],
+                    self.data["info"]["bin"]["bits"],
+                    self.data["info"]["bin"]["arch"],
+                    self.data["info"]["bin"]["os"],
+                    self.data["info"]["bin"]["stripped"],
+                )
             )
 
-        return "[No file loaded]"
+        return "file: <none>"
 
     def get_string_table_symbols(self, rdata):
         g_str = self.find_symbol("go.string.*")
@@ -80,6 +100,7 @@ class GoStringsR2:
         return None
 
     def get_string_table_search(self, rdata):
+        self.log("Searching for string table")
         if rdata is not None:
             str_start, str_size = self.find_longest_string(rdata["data"])
 
@@ -139,6 +160,9 @@ class GoStringsR2:
         else:
             strtab_start = stab_sym["vaddr"]
             strtab_end = strtab_start + stab_sym["tabsize"]
+            self.log(
+                "String table at 0x{:x} thru 0x{:x}".format(strtab_start, strtab_end)
+            )
             strtab = {
                 "startaddr": strtab_start,
                 "endaddr": strtab_end,
@@ -148,24 +172,36 @@ class GoStringsR2:
 
     def find_symbol(self, symbol_name):
         for sym in self.data["symbols"]:
-            if sym["name"] == symbol_name:
+            if sym.get("name", "") == symbol_name:
                 return sym
         return None
 
     def get_cross_refs_x86(self):
         self.run("/ra")
-        return self.run("axq")
 
     def get_cross_refs_arm(self):
         self.run("aae")
-        return self.run("axq")
 
     def get_cross_refs(self):
         xrefs = None
+
+        # Only check .text; other executable sections may get searched otherwise
+        # If more than one .text section exists, changeme
+        code_section = self.get_code_section()
+        if code_section is not None:
+            c_start = code_section["vaddr"]
+            c_end = c_start + code_section["size"]
+            self.log(
+                "Limited cross-ref check from 0x{:x} to 0x{:x}".format(c_start, c_end)
+            )
+            self.run("e search.from=0x{:x}".format(c_start))
+            self.run("e search.to=0x{:x}".format(c_end))
+
         if self.arch == "x86":
-            xrefs = self.get_cross_refs_x86()
+            self.get_cross_refs_x86()
         elif self.arch == "arm":
-            xrefs = self.get_cross_refs_arm()
+            self.get_cross_refs_arm()
+        xrefs = self.run("axq")
         return xrefs
 
     def get_section_info(self, section_name):
@@ -179,20 +215,20 @@ class GoStringsR2:
         if secobj is not None:
             s_base = secobj["vaddr"]
             s_size = secobj["vsize"]
-            rdsize = 2048
+            rdsize = 4096
             i = 0
             sdata = b""
             while s_size > 0:
-                c = "pr {} @0x{:x}".format(min(rdsize, s_size), s_base + i * 2048)
-                sdat = self.run(c)
-                sdata += sdat
+                c = "p8 {} @0x{:x}".format(min(rdsize, s_size), s_base + i * rdsize)
+                sdat = self.run(c).strip()
+                sdata += binascii.unhexlify(sdat)
                 i += 1
                 s_size -= rdsize
 
             return {"name": section_name, "vaddr": s_base, "data": sdata}
         return None
 
-    def find_strings(self, refs, tablebase, tabledata):
+    def find_strings(self, minlength, encoding, refs, tablebase, tabledata):
         # refs.keys() = address, refs.values() = count
         refs_addrs = sorted(refs.keys(), reverse=True)
 
@@ -207,10 +243,13 @@ class GoStringsR2:
             else:
                 r_end_offset = len(tabledata)
 
-            r_str = tabledata[r_offset:r_end_offset]
-            all_strings.append([tablebase + r_offset, r_end_offset - r_offset, r_str])
+            r_str = tabledata[r_offset:r_end_offset].decode(encoding, errors="ignore")
+            decoded_len = len(r_str)
+            all_strings.append([tablebase + r_offset, decoded_len, r_str])
 
-        return all_strings
+        # filter all_strings by length requirement, then reverse order
+        # since all_strings started at the end
+        return list(reversed([s for s in all_strings if s[1] >= minlength]))
 
     def is_a_string_ref(
         self, src_addr, dst_addr, strtab_addr, strtab_endaddr, code_section
@@ -219,7 +258,7 @@ class GoStringsR2:
             if code_section is None:
                 return True
             else:
-                return dst_addr >= code_section["vaddr"] and src_addr < (
+                return src_addr >= code_section["vaddr"] and src_addr < (
                     code_section["vaddr"] + code_section["size"]
                 )
 
@@ -231,12 +270,12 @@ class GoStringsR2:
         code_section = self.get_code_section()
 
         # 0x01640839 -> 0x016408a9  CALL
-        for line in xrefs.split(b"\n"):
-            lparts = line.split(b" ")
+        for line in xrefs.split("\n"):
+            lparts = line.split(" ")
             # 0 = src, 1= arrow, 2 = dst, 3=empty, 4=type
             if len(lparts) == 5:
-                r_src = int(lparts[0].decode("ascii"), 16)
-                r_dst = int(lparts[2].decode("ascii"), 16)
+                r_src = int(lparts[0], 16)
+                r_dst = int(lparts[2], 16)
                 if self.is_a_string_ref(
                     r_src, r_dst, strtab_start, strtab_end, code_section
                 ):
@@ -245,3 +284,33 @@ class GoStringsR2:
                     ) + 1
 
         return str_refs
+
+    def log(self, log_msg, *args, **kwargs):
+        if self.logging:
+            print('\033[92m' + log_msg + '\033[0m', *args, **kwargs, file=sys.stderr)
+
+    def get_strings(self, minlength, encoding="ascii"):
+
+        ret_strings = []
+
+        self.log("Locating string table...")
+        strtab = self.get_string_table()
+        if strtab is None:
+            raise GoStringsR2Error("couldn't find the Go string table in the binary")
+
+        self.log("Retrieving cross references...")
+        xrefs = self.get_cross_refs()
+        if xrefs is None:
+            raise GoStringsR2Error("r2 returned no cross-references")
+
+        self.log("Locating string references...")
+        str_refs = self.process_xrefs(xrefs, strtab["startaddr"], strtab["endaddr"])
+
+        self.log("Retrieved {} references to the string table".format(len(str_refs)))
+        if len(str_refs):
+            ret_strings = self.find_strings(
+                minlength, encoding, str_refs, strtab["startaddr"], strtab["data"]
+            )
+
+        self.log("Found strings: {}".format(len(ret_strings)))
+        return ret_strings
