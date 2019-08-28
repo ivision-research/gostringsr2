@@ -1,6 +1,6 @@
 # Changelog
 
-## next
+## 1.1.0
 
 - Use `p8` instead of `pr` to get raw data (#1)
 - Fix bug in is_a_string_ref() (#1)
