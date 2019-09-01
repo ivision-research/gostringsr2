@@ -1,6 +1,6 @@
 # Changelog
 
-## next
+## 1.1.1
 
 - Add `-s` option to generate an r2 script that can be loaded into radare2 afterwards
 

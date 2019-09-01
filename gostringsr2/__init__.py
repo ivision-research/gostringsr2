@@ -4,6 +4,6 @@
 
 __author__ = """Jonathan Wrightsell"""
 __email__ = "jonathan.wrightsell@carvesystems.com"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from .gostringsr2 import *
