@@ -8,6 +8,8 @@ Tested on Go binaries with architectures: x86 (32 and 64 bit), ARM (32 and 64 bi
 
 Tested on Go binaries with file formats: ELF (Linux), Mach-O (OS X), PE (Windows).
 
+v1.0.0 code walkthrough - https://carvesystems.com/news/reverse-engineering-go-binaries-using-radare-2-and-python/
+
 ## Installation
 
 1. Install radare2.
