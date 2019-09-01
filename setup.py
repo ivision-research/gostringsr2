@@ -30,7 +30,7 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
     ],
-    description="gostrings-r2 extracts strings from a Go binary using radare2",
+    description="gostringsr2 extracts strings from a Go binary using radare2",
     entry_points={"console_scripts": ["gostringsr2=gostringsr2.cli:main"]},
     install_requires=requirements,
     license="MIT license",

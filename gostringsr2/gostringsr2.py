@@ -3,6 +3,8 @@
 import sys
 import json
 import binascii
+import re
+import base64
 
 from . import quietr2pipe as r2pipe
 
@@ -229,7 +231,7 @@ class GoStringsR2:
         return None
 
     def find_strings(self, minlength, encoding, refs, tablebase, tabledata):
-        # refs.keys() = address, refs.values() = count
+        # refs.keys() = dest address, refs.values() = list of source addresses
         refs_addrs = sorted(refs.keys(), reverse=True)
 
         all_strings = []
@@ -245,7 +247,15 @@ class GoStringsR2:
 
             r_str = tabledata[r_offset:r_end_offset].decode(encoding, errors="ignore")
             decoded_len = len(r_str)
-            all_strings.append([tablebase + r_offset, decoded_len, r_str])
+            all_strings.append(
+                [
+                    tablebase + r_offset,
+                    decoded_len,
+                    r_str,
+                    r_end_offset - r_offset,
+                    refs[r],
+                ]
+            )
 
         # filter all_strings by length requirement, then reverse order
         # since all_strings started at the end
@@ -279,15 +289,16 @@ class GoStringsR2:
                 if self.is_a_string_ref(
                     r_src, r_dst, strtab_start, strtab_end, code_section
                 ):
-                    str_refs[r_dst] = (
-                        0 if r_dst not in str_refs.keys() else str_refs[r_dst]
-                    ) + 1
+                    if r_dst in str_refs.keys():
+                        str_refs[r_dst].append(r_src)
+                    else:
+                        str_refs[r_dst] = [r_src]
 
         return str_refs
 
     def log(self, log_msg, *args, **kwargs):
         if self.logging:
-            print('\033[92m' + log_msg + '\033[0m', *args, **kwargs, file=sys.stderr)
+            print("\033[92m" + log_msg + "\033[0m", *args, **kwargs, file=sys.stderr)
 
     def get_strings(self, minlength, encoding="ascii"):
 
@@ -314,3 +325,28 @@ class GoStringsR2:
 
         self.log("Found strings: {}".format(len(ret_strings)))
         return ret_strings
+
+    def get_r2_script_for_string(self, go_string, encoding):
+        s_addr, s_decoded_len, s_value, s_bin_len, s_refs = go_string
+        script = []
+
+        # sanitized flag name, up to 20 alpha numeric chars
+        san_str = re.sub("[^a-zA-Z0-9]", "_", s_value)[:20]
+
+        # comment will be up to 50 chars; replace newlines with double slash //
+        trunc_str = '({}) "{}{}"'.format(
+            s_decoded_len,
+            re.sub("[\n]", "//", s_value[:50]),
+            "..." if s_decoded_len > 50 else "",
+        )
+        # ...but base64 encoded because r2 doesn't like ; chars
+        trunc_str = base64.b64encode(trunc_str.encode(encoding)).decode("ascii")
+
+        # create flag for the string value, use bin length for r2
+        script.append("f str.go.{} {} @0x{:x}\n".format(san_str, s_bin_len, s_addr))
+        # create string reference and comment at each reference containing a snippet of the string
+        for r in s_refs:
+            script.append("axs 0x{:x} @0x{:x}\n".format(s_addr, r))
+            script.append("CCu base64:{} @0x{:x}\n".format(trunc_str, r))
+
+        return script

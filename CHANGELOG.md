@@ -1,5 +1,9 @@
 # Changelog
 
+## next
+
+- Add `-s` option to generate an r2 script that can be loaded into radare2 afterwards
+
 ## 1.1.0
 
 - Use `p8` instead of `pr` to get raw data (#1)
