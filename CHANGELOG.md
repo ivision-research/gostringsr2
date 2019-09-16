@@ -1,6 +1,6 @@
 # Changelog
 
-## next
+## 1.1.2
 
 - Validate file is elf/pe/mach0 or throw an error
 - Rearrange logic so that non-ARM/x86 architectures may work
