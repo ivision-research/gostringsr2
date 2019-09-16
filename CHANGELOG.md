@@ -1,5 +1,9 @@
 # Changelog
 
+## next
+
+- Open r2pipe with `-2` flag to kill stderr
+
 ## 1.1.1
 
 - Add `-s` option to generate an r2 script that can be loaded into radare2 afterwards

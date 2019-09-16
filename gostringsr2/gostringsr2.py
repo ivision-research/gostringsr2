@@ -6,7 +6,7 @@ import binascii
 import re
 import base64
 
-from . import quietr2pipe as r2pipe
+import r2pipe
 
 
 class GoStringsR2Error(RuntimeError):
@@ -32,7 +32,7 @@ class GoStringsR2:
 
     def load(self):
         self.log("Loading file into r2: {}".format(self.file))
-        self.r2 = r2pipe.open(self.file)
+        self.r2 = r2pipe.open(self.file, flags=["-2"])
         self.data = {}
         self.data["info"] = self.runjson("ij")
         if "bin" not in self.data["info"]:
