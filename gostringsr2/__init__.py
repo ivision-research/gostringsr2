@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""Top-level package for gostrings-r2."""
+"""Top-level package for gostringsr2."""
 
 __author__ = """Jonathan Wrightsell"""
 __email__ = "jonathan.wrightsell@carvesystems.com"

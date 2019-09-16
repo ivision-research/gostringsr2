@@ -2,6 +2,9 @@
 
 ## next
 
+- Validate file is elf/pe/mach0 or throw an error
+- Rearrange logic so that non-ARM/x86 architectures may work
+- Add some docs to GoStringsR2
 - Open r2pipe with `-2` flag to kill stderr
 
 ## 1.1.1
